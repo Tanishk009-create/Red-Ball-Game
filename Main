@@ -1,0 +1,669 @@
+import java.awt.*;
+import java.awt.event.*;
+import java.awt.geom.AffineTransform;
+import java.util.ArrayList;
+import javax.swing.*;
+
+public class Main {
+    public static void main(String[] args) {
+        JFrame frame = new JFrame("Red Ball 4 Clone");
+        frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        frame.setContentPane(new GamePanel());
+        frame.pack();
+        frame.setLocationRelativeTo(null);
+        frame.setVisible(true);
+    }
+}
+
+class GamePanel extends JPanel implements ActionListener, KeyListener {
+
+    // Game constants
+    private static final int DELAY = 15; // ~60 FPS
+
+    // Game objects
+    private Player player;
+    private ArrayList<Platform> platforms;
+    private ArrayList<PowerUp> powerUps;
+    private ArrayList<PowerDown> powerDowns;
+    private Point goal;
+
+    // Game state
+    private int currentLevel = 1;
+    private int score = 0;
+    private boolean gameOver = false;
+    private boolean levelComplete = false;
+    private Timer gameTimer;
+    private Timer effectTimer;
+    private long powerUpEndTime = 0;
+    private long shrinkEndTime = 0;
+
+    public GamePanel() {
+        setPreferredSize(new Dimension(1500, 900));
+        setBackground(Color.CYAN);
+        setFocusable(true);
+        addKeyListener(this);
+
+        initGame();
+    }
+
+    private void initGame() {
+        player = new Player(100, 400);
+        platforms = new ArrayList<>();
+        powerUps = new ArrayList<>();
+        powerDowns = new ArrayList<>();
+        loadLevel(currentLevel);
+
+        gameTimer = new Timer(DELAY, this);
+        gameTimer.start();
+
+        effectTimer = new Timer(100, e -> checkEffects());
+        effectTimer.start();
+    }
+
+    private void checkEffects() {
+        long currentTime = System.currentTimeMillis();
+        
+        // Reset power-up effect if expired
+        if (powerUpEndTime > 0 && currentTime > powerUpEndTime) {
+            player.resetSize();
+            powerUpEndTime = 0;
+        }
+        
+        // Reset shrink effect if expired
+        if (shrinkEndTime > 0 && currentTime > shrinkEndTime) {
+            player.resetSize();
+            shrinkEndTime = 0;
+        }
+    }
+
+    private void resetPlayer() {
+        player = new Player(100, 400); // Always reset to starting position
+    
+        // Also reset any power-up effects
+        powerUpEndTime = 0;
+        shrinkEndTime = 0;
+    }
+
+    private void loadLevel(int level) {
+        platforms.clear();
+        powerUps.clear();
+        powerDowns.clear();
+        levelComplete = false;
+
+        resetPlayer();
+
+        // Add base ground
+        platforms.add(new Platform(100, 700, 450, 30));
+
+        switch (level) {
+            case 1:
+                // Level 1 layout
+                platforms.add(new Platform(500, 550, 200, 30));
+                platforms.add(new Platform(700, 400, 200, 30));
+                platforms.add(new MovingPlatform(1000, 250, 100, 30, 800, 1250, true, 2));
+                powerUps.add(new PowerUp(600, 410));
+                powerDowns.add(new PowerDown(1280, 220));
+                goal = new Point(1300, 100);
+                break;
+
+            case 2:
+                // Level 2 layout
+                platforms.add(new Platform(500, 550, 200, 30));
+                platforms.add(new Platform(500, 250, 400, 30));
+                platforms.add(new Platform(300, 400, 200, 30));
+                platforms.add(new MovingPlatform(1000, 200, 150, 30, 200, 600, false, 2));
+                powerUps.add(new PowerUp(670, 410));
+                powerDowns.add(new PowerDown(950, 250));
+                goal = new Point(1250, 200);
+                break;
+
+            case 3:
+                // Level 3 layout
+                platforms.add(new Platform(500, 550, 200, 30));
+                 platforms.add(new Platform(700, 400, 200, 30));
+                platforms.add(new MovingPlatform(100, 250, 150, 30, 100, 900, true, 2));
+                platforms.add(new MovingPlatform(1050, 200, 150, 30, 200, 600, false, 2));
+                powerUps.add(new PowerUp(200, 150));
+                powerDowns.add(new PowerDown(950, 350));
+                goal = new Point(1300, 200);
+                break;
+        }
+    }
+
+    public void actionPerformed(ActionEvent e) {
+        if (!gameOver && !levelComplete) {
+            // Update game objects
+            player.update(platforms);
+
+            // Update moving platforms
+            for (Platform platform : platforms) {
+                if (platform instanceof MovingPlatform) {
+                    ((MovingPlatform) platform).update();
+                }
+            }
+
+            // Check for goal collision
+            if (player.getBounds().intersects(new Rectangle(goal.x, goal.y, 30, 30))) {
+                levelComplete = true;
+                score += 100 * currentLevel;
+                showLevelComplete();
+            }
+
+            // Check power-up collisions
+            for (PowerUp powerUp : powerUps) {
+                if (powerUp.isActive() && powerUp.checkCollision(player.getBounds())) {
+                    player.increaseSize();
+                    powerUpEndTime = System.currentTimeMillis() + powerUp.getEffectDuration();
+                    score += 50;
+                }
+            }
+            
+            // Check enemy collisions
+            for (PowerDown powerDown : powerDowns) {
+                if (powerDown.isActive() && powerDown.checkCollision(player.getBounds())) {
+                    player.decreaseSize();
+                    shrinkEndTime = System.currentTimeMillis() + powerDown.getEffectDuration();
+                    score -= 30;
+                }
+            }
+
+            // Check for death
+            if (player.isDead()) {
+                gameOver = true;
+                showGameOver();
+            }
+
+            repaint();
+        }
+    }
+
+    protected void paintComponent(Graphics g) {
+        super.paintComponent(g);
+
+        // Draw platforms
+        for (Platform platform : platforms) {
+            platform.draw(g);
+        }
+
+        // Draw power-ups
+        for (PowerUp powerUp : powerUps) {
+            powerUp.draw(g);
+        }
+        
+        // Draw power-downs
+        for (PowerDown powerDown : powerDowns) {
+            powerDown.draw(g);
+        }
+
+        // Draw goal (flag)
+        drawGoal(g);
+
+        // Draw player
+        player.draw(g);
+
+        // Draw UI
+        drawUI(g);
+
+        // Draw active effects
+        drawEffects(g);
+    }
+
+    private void drawGoal(Graphics g) {
+        g.setColor(Color.black);
+        g.fillRect(goal.x, goal.y, 7, 45); // Flag pole
+        g.setColor(Color.RED);
+        g.fillPolygon( // Flag
+                new int[] { goal.x, goal.x + 30, goal.x },
+                new int[] { goal.y, goal.y + 10, goal.y + 20 },
+                3);
+    }
+
+    private void drawUI(Graphics g) {
+        g.setColor(Color.BLACK);
+        g.setFont(new Font("Arial", Font.BOLD, 20));
+        g.drawString("Level: " + currentLevel, 20, 30);
+        g.drawString("Score: " + score, 20, 60);
+
+        if (gameOver) {
+            g.setFont(new Font("Arial", Font.BOLD, 40));
+            g.drawString("GAME OVER", WIDTH / 2 - 100, HEIGHT / 2);
+        }
+
+        if (levelComplete) {
+            g.setFont(new Font("Arial", Font.BOLD, 40));
+            g.drawString("LEVEL COMPLETE!", WIDTH / 2 - 150, HEIGHT / 2);
+        }
+    }
+
+    private void drawEffects(Graphics g) {
+        long currentTime = System.currentTimeMillis();
+        g.setFont(new Font("Arial", Font.BOLD, 16));
+        
+        if (powerUpEndTime > currentTime) {
+            g.setColor(Color.YELLOW);
+            g.drawString("BIG BALL: " + ((powerUpEndTime - currentTime)/1000 + 1) + "s", 600,100);
+        }
+        
+        if (shrinkEndTime > currentTime) {
+            g.setColor(Color.RED);
+            g.drawString("SMALL BALL: " + ((shrinkEndTime - currentTime)/1000 + 1) + "s", 600,100);
+        }
+    }
+
+    private void showGameOver() {
+        gameTimer.stop();
+        int choice = JOptionPane.showConfirmDialog(
+                this,
+                "Game Over! Try again?",
+                "Game Over",
+                JOptionPane.YES_NO_OPTION);
+
+        if (choice == JOptionPane.YES_OPTION) {
+            resetPlayer();
+        } else {
+            System.exit(0);
+        }
+    }
+
+    private void showLevelComplete() {
+        gameTimer.stop();
+        if (currentLevel < 2) { // Change based on total levels
+            int choice = JOptionPane.showConfirmDialog(
+                    this,
+                    "Level Complete! Next level?",
+                    "Congratulations!",
+                    JOptionPane.YES_NO_OPTION);
+
+            if (choice == JOptionPane.YES_OPTION) {
+                currentLevel++;
+                resetPlayer(); 
+                loadLevel(currentLevel);
+                gameTimer.start();
+            } else {
+                System.exit(0);
+            }
+        } else {
+            JOptionPane.showMessageDialog(
+                    this,
+                    "You beat all levels! Final score: " + score,
+                    "You Win!",
+                    JOptionPane.INFORMATION_MESSAGE);
+            System.exit(0);
+        }
+    }
+
+    private void resetGame() {
+        currentLevel = 1;
+        score = 0;
+        resetPlayer();
+        gameOver = false;
+        loadLevel(currentLevel);
+        gameTimer.start();
+    }
+
+    private void resetLevel() {
+        resetPlayer();
+        loadLevel(currentLevel);
+        gameOver = false;
+        gameTimer.start();
+    }
+
+    // Key listener methods
+    public void keyPressed(KeyEvent e) {
+        player.keyPressed(e);
+
+        // Reset game on Enter key
+        if (e.getKeyCode() == KeyEvent.VK_ENTER) {
+            resetGame();
+        }
+    }
+
+    public void keyReleased(KeyEvent e) {
+        player.keyReleased(e);
+    }
+
+    public void keyTyped(KeyEvent e) {
+    }
+}
+
+class Player {
+    private Vector2D position;
+    private Vector2D velocity;
+    private final double gravity = 0.75;
+    private final double jumpStrength = -15;
+    private final double Speed = 5;
+    private double rotationAngle = 0;
+    private boolean isOnGround = false;
+    private boolean canJump = true;
+    private boolean isDead = false;
+    private int size = 40; // Default size
+    private final int defaultSize = 40;
+
+    private volatile boolean jumpPressed = false;
+    private volatile boolean leftPressed = false;
+    private volatile boolean rightPressed = false;
+
+    public Player(double x, double y) {
+        position = new Vector2D(x, y);
+        velocity = new Vector2D(0, 0);
+    }
+
+    public void update(ArrayList<Platform> platforms) {
+        // Horizontal movement
+        velocity.x = 0;
+        if (leftPressed) 
+        velocity.x = -Speed;
+        
+        if (rightPressed) 
+        velocity.x = Speed;
+
+        // Handle jumping (instant response)
+    if (jumpPressed && isOnGround && canJump) {
+        velocity.y = jumpStrength;
+        isOnGround = false;
+        canJump = false;
+        jumpPressed = false; // Reset to prevent continuous jumping
+    }
+        // Apply gravity
+        velocity.y += gravity;
+
+        // Update position
+        position = position.add(velocity);
+
+        // Update rotation based on movement
+        rotationAngle += velocity.x * 0.05;
+
+        // Check platform collisions
+        checkPlatformCollisions(platforms);
+
+        // Check if player fell off screen
+        if (position.y > 900) {
+            isDead = true;
+        }
+    }
+
+    private void checkPlatformCollisions(ArrayList<Platform> platforms) {
+    isOnGround = false;
+    Rectangle playerBounds = getBounds();
+
+    for (Platform platform : platforms) {
+        Rectangle platformBounds = platform.getBounds();
+
+        if (playerBounds.intersects(platformBounds)) {
+            // Calculate overlap depths
+            double bottomOverlap = (platformBounds.y) - (playerBounds.y + playerBounds.height);
+            double topOverlap = (playerBounds.y) - (platformBounds.y + platformBounds.height);
+            double leftOverlap = (playerBounds.x) - (platformBounds.x + platformBounds.width);
+            double rightOverlap = (platformBounds.x) - (playerBounds.x + playerBounds.width);
+
+            // Resolve collision based on the smallest overlap
+            double minOverlap = Math.min(
+                Math.min(Math.abs(bottomOverlap), Math.abs(topOverlap)),
+                Math.min(Math.abs(leftOverlap), Math.abs(rightOverlap))
+            );
+
+            // Bottom collision (landing on platform)
+            if (minOverlap == Math.abs(bottomOverlap) && velocity.y > 0) {
+                position.y = platformBounds.y - playerBounds.height;
+                velocity.y = 0;
+                isOnGround = true;
+                canJump = true;
+            }
+            // Top collision (hit from below)
+            else if (minOverlap == Math.abs(topOverlap) && velocity.y < 0) {
+                position.y = platformBounds.y + platformBounds.height;
+                velocity.y = 0;
+            }
+            // Left collision
+            else if (minOverlap == Math.abs(leftOverlap) && velocity.x > 0) {
+                position.x = platformBounds.x + platformBounds.width;
+                velocity.x = 0;
+            }
+            // Right collision
+            else if (minOverlap == Math.abs(rightOverlap) && velocity.x < 0) {
+                position.x = platformBounds.x - playerBounds.width;
+                velocity.x = 0;
+            }
+        }
+    }
+}
+    public Rectangle getBounds() {
+    return new Rectangle((int) position.x, (int) position.y, size, size);
+}
+
+    public void draw(Graphics g) {
+    Graphics2D g2d = (Graphics2D) g;
+    AffineTransform oldTransform = g2d.getTransform();
+
+    // Calculate proportions based on current size
+    float eyeCenterXRatio = 0.35f;  // 35% from left for left eye center
+    float eyeVerticalRatio = 0.33f; // 33% from top for eyes
+    float eyeSizeRatio = 0.2f;      // 20% of ball size for eyes
+    float pupilSizeRatio = 0.5f;    // 50% of eye size for pupils
+
+    // Calculate positions and sizes
+    int eyeSize = (int)(size * eyeSizeRatio);
+    int pupilSize = (int)(eyeSize * pupilSizeRatio);
+    int eyeY = (int)(size * eyeVerticalRatio);
+    
+    // Calculate eye centers
+    int leftEyeCenterX = (int)(size * eyeCenterXRatio);
+    int rightEyeCenterX = (int)(size * (1 - eyeCenterXRatio));
+
+    // Convert centers to draw positions (subtract half eye size)
+    int leftEyeX = leftEyeCenterX - (eyeSize/2);
+    int rightEyeX = rightEyeCenterX - (eyeSize/2);
+
+    // Rotate around center point
+    g2d.rotate(rotationAngle, 
+              position.x + size/2, 
+              position.y + size/2);
+
+    // Draw main ball
+    g2d.setColor(Color.RED);
+    g2d.fillOval((int) position.x, (int) position.y, size, size);
+
+    // Draw eyes (white part)
+    g2d.setColor(Color.WHITE);
+    g2d.fillOval((int) position.x + leftEyeX, (int) position.y + eyeY, eyeSize, eyeSize);
+    g2d.fillOval((int) position.x + rightEyeX, (int) position.y + eyeY, eyeSize, eyeSize);
+
+    // Draw pupils (black part)
+    g2d.setColor(Color.BLACK);
+    int pupilOffset = (eyeSize - pupilSize)/2;
+    g2d.fillOval((int) position.x + leftEyeX + pupilOffset, 
+                (int) position.y + eyeY + pupilOffset, 
+                pupilSize, pupilSize);
+    g2d.fillOval((int) position.x + rightEyeX + pupilOffset, 
+                (int) position.y + eyeY + pupilOffset, 
+                pupilSize, pupilSize);
+
+    g2d.setTransform(oldTransform);
+}
+
+    public void increaseSize() {
+    // Store bottom position before resizing
+    double previousBottom = position.y + size;
+    size = defaultSize * 2;
+    // Maintain bottom position after resize
+    position.y = previousBottom - size;
+}
+
+public void decreaseSize() {
+    // Store bottom position before resizing
+    double previousBottom = position.y + size;
+    size = defaultSize / 2;
+    // Maintain bottom position after resize
+    position.y = previousBottom - size;
+}
+    
+    public void resetSize() {
+        size = defaultSize;
+    }
+
+    
+public void keyPressed(KeyEvent e) {
+    switch (e.getKeyCode()) {
+        case KeyEvent.VK_LEFT:  this.leftPressed = true; break;
+        case KeyEvent.VK_RIGHT: this.rightPressed = true; break;
+        case KeyEvent.VK_SPACE: this.jumpPressed = true; break;
+    }
+}
+
+
+public void keyReleased(KeyEvent e) {
+    switch (e.getKeyCode()) {
+        case KeyEvent.VK_LEFT:  this.leftPressed = false; break;
+        case KeyEvent.VK_RIGHT: this.rightPressed = false; break;
+    }
+}
+
+    public boolean isDead() {
+        return isDead;
+    }
+}
+
+class Platform {
+    protected int x, y, width, height;
+
+    public Platform(int x, int y, int width, int height) {
+        this.x = x;
+        this.y = y;
+        this.width = width;
+        this.height = height;
+    }
+
+    public void draw(Graphics g) {
+        g.setColor(new Color(100, 100, 100)); // Dark gray
+        g.fillRect(x, y, width, height);
+    }
+
+    public Rectangle getBounds() {
+        return new Rectangle(x, y, width, height);
+    }
+}
+
+class MovingPlatform extends Platform {
+    private int start, end;
+    private boolean isHorizontal;
+    private int speed;
+    private boolean movingForward = true;
+
+    public MovingPlatform(int x, int y, int width, int height,
+            int start, int end, boolean isHorizontal, int speed) {
+        super(x, y, width, height);
+        this.start = start;
+        this.end = end;
+        this.isHorizontal = isHorizontal;
+        this.speed = speed;
+    }
+
+    public void update() {
+        if (isHorizontal) {
+            if (movingForward) {
+                x += speed;
+                if (x >= end)
+                    movingForward = false;
+            } else {
+                x -= speed;
+                if (x <= start)
+                    movingForward = true;
+            }
+        } else {
+            if (movingForward) {
+                y += speed;
+                if (y >= end)
+                    movingForward = false;
+            } else {
+                y -= speed;
+                if (y <= start)
+                    movingForward = true;
+            }
+        }
+    }
+
+    @Override
+    public void draw(Graphics g) {
+        g.setColor(new Color(70, 70, 70)); // Different color for moving platforms
+        g.fillRect(x, y, width, height);
+    }
+}
+
+class PowerUp {
+    private int x, y;
+    private boolean active = true;
+    private static final int SIZE = 20;
+    private static final int EFFECT_DURATION = 5000; // 5 seconds
+    
+    public PowerUp(int x, int y) {
+        this.x = x;
+        this.y = y;
+    }
+    
+    public void draw(Graphics g) {
+        if (!active) return;
+        g.setColor(Color.YELLOW);
+        g.fillOval(x, y, SIZE, SIZE);
+        g.setColor(Color.BLACK);
+        g.drawString("+", x + 6, y + 15);
+    }
+    
+    public boolean checkCollision(Rectangle bounds) {
+        if (!active) return false;
+        Rectangle powerUpBounds = new Rectangle(x, y, SIZE, SIZE);
+        if (bounds.intersects(powerUpBounds)) {
+            active = false;
+            return true;
+        }
+        return false;
+    }
+    
+    public boolean isActive() { return active; }
+    public int getEffectDuration() { return EFFECT_DURATION; }
+}
+
+class PowerDown {
+    private int x, y;
+    private boolean active = true;
+    private static final int SIZE = 30;
+    private static final int EFFECT_DURATION = 5000; // 5 seconds
+    
+    public PowerDown(int x, int y) {
+        this.x = x;
+        this.y = y;
+    }
+    
+    public void draw(Graphics g) {
+        if (!active) return;
+        g.setColor(Color.BLACK);
+        g.fillOval(x, y, SIZE, SIZE);
+        g.setColor(Color.RED);
+        g.drawString("-", x + 12, y + 20);
+    }
+    
+    public boolean checkCollision(Rectangle bounds) {
+        if (!active) return false;
+        Rectangle enemyBounds = new Rectangle(x, y, SIZE, SIZE);
+        if (bounds.intersects(enemyBounds)) {
+            active = false;
+            return true;
+        }
+        return false;
+    }
+    
+    public boolean isActive() { return active; }
+    public int getEffectDuration() { return EFFECT_DURATION; }
+}
+
+class Vector2D {
+    public double x, y;
+
+    public Vector2D(double x, double y) {
+        this.x = x;
+        this.y = y;
+    }
+
+    public Vector2D add(Vector2D other) {
+        return new Vector2D(x + other.x, y + other.y);
+    }
+}
